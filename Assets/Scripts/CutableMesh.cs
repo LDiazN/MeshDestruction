@@ -42,7 +42,7 @@ public class CutableMesh : MonoBehaviour
 
         public Vector2 uvs;
         public Vector3 normal;
-        public Vector3 tangent;
+        public Vector4 tangent;
     }
 
     private MeshFilter _meshFilter;
@@ -110,11 +110,18 @@ public class CutableMesh : MonoBehaviour
         // Resize array once to avoid multiple array reallocations
         var vertices = mesh.vertices;
         var triangles = mesh.triangles;
+        var uvs = mesh.uv;
+        var normals = mesh.normals;
+        var tangents = mesh.tangents;
 
         var nextVertexIndex = vertices.Length;
         var nextTrianglesIndex = triangles.Length;
 
         Array.Resize(ref vertices, vertices.Length + 2 * intersections.Count);
+        Array.Resize(ref uvs, uvs.Length + 2 * intersections.Count);
+        Array.Resize(ref normals, normals.Length + 2 * intersections.Count); 
+        Array.Resize(ref tangents, tangents.Length + 2 * intersections.Count); 
+
         // Each intersection generates 2 more triangles and modifies one triangle in the previous mesh,
         // so you add 2 * 3 * intersections.Count 
         Array.Resize(ref triangles,  triangles.Length + 3 * 2 * intersections.Count);
@@ -123,13 +130,16 @@ public class CutableMesh : MonoBehaviour
         int i = 0;
         foreach(var intersection in intersections)
         {
-            AddTrianglesFromIntersectingTriangle(intersection, plane, ref vertices, ref triangles, nextVertexIndex, nextTrianglesIndex, i++);
+            AddTrianglesFromIntersectingTriangle(intersection, plane, ref vertices, ref uvs, ref normals, ref tangents, ref triangles, nextVertexIndex, nextTrianglesIndex, i++);
         }
 
         // Now that we added new segments, we can split using disjoints sets
 
         // -- DEBUG ONLY, DELETE LATER -----------------------
         mesh.vertices = vertices;
+        mesh.uv = uvs;
+        mesh.normals = normals;
+        mesh.tangents = tangents;
         mesh.triangles = triangles;
         // ---------------------------------------------------
 
@@ -141,6 +151,9 @@ public class CutableMesh : MonoBehaviour
         in TriangleIntersection triangleIntersection, 
         in Plane plane,
         ref Vector3[] vertices, 
+        ref Vector2[] uvs,
+        ref Vector3[] normals,
+        ref Vector4[] tangents,
         ref int[] triangles, 
         int vertexIndexStart, 
         int triangleIndexStart, 
@@ -152,22 +165,28 @@ public class CutableMesh : MonoBehaviour
 
         // Add new vertices to vertice array
         var nextVertexIndex = vertexIndexStart + intersectionIndex * 2;
-        vertices[nextVertexIndex] = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
-        // TODO tenemos que agregar los otros arreglos de atributos a esta función
+        vertices[nextVertexIndex]   = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
+        normals[nextVertexIndex]    = triangleIntersection.p1Attrs.normal;
+        uvs[nextVertexIndex]        = triangleIntersection.p1Attrs.uvs;
+        normals[nextVertexIndex]    = triangleIntersection.p1Attrs.normal;
+        tangents[nextVertexIndex]   = triangleIntersection.p1Attrs.tangent;
+
         var p1Index = nextVertexIndex;
         nextVertexIndex++;
 
-        vertices[nextVertexIndex] = WorldToLocal(triangleIntersection.position2);
+        vertices[nextVertexIndex]   = WorldToLocal(triangleIntersection.position2);
+        normals[nextVertexIndex]    = triangleIntersection.p2Attrs.normal;
+        uvs[nextVertexIndex]        = triangleIntersection.p2Attrs.uvs;
+        normals[nextVertexIndex]    = triangleIntersection.p2Attrs.normal;
+        tangents[nextVertexIndex]   = triangleIntersection.p2Attrs.tangent;
+
+
         var p2Index = nextVertexIndex;
 
         // Check which vertex of previous triangle was alone in the other side of the plane
         var v0Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[triangleIntersection.v0Index]));
         var v1Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[triangleIntersection.v1Index]));
         var v2Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[triangleIntersection.v2Index]));
-
-        int aloneTriangleIndex;
-        int same1TriangleIndex;
-        int same2TriangleIndex;
 
         int aloneIndex = -1, same1Index = -1, same2Index = -1;
 
@@ -338,7 +357,7 @@ public class CutableMesh : MonoBehaviour
         float d0 = DistancePointToPlane(v0, planeNormal, planeDistance);
         float d1 = DistancePointToPlane(v1, planeNormal, planeDistance);
 
-        if (d0 * d1 > 0) // Points in the same side of plane
+        if (d0 * d1 >= 0 ) // Points in the same side of plane
         {
             intersectionPoint = Vector3.zero;
             t = 0;
@@ -464,10 +483,13 @@ public class CutableMesh : MonoBehaviour
 
     public VertexAttributes InterpolateVertexAttributes(VertexAttributes v0Attr, VertexAttributes v1Attr, float t)
     {
-        Debug.Assert(0 <= t && t <= 1, "Inconsistent interpolation value");
+        if (!(0 <= t && t <= 1))
+            Debug.Assert(false, "Bad intersection");
+
+        Debug.Assert(0 <= t && t <= 1, $"Inconsistent interpolation value: {t}");
         VertexAttributes newAttrs;
         newAttrs.normal = Vector3.Lerp(v0Attr.normal, v1Attr.normal, t);
-        newAttrs.tangent = Vector3.Lerp(v0Attr.tangent, v1Attr.tangent, t);
+        newAttrs.tangent = Vector4.Lerp(v0Attr.tangent, v1Attr.tangent, t);
         newAttrs.uvs = Vector2.Lerp(v0Attr.uvs, v1Attr.uvs, t);
 
         return newAttrs;
