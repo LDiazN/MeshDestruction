@@ -117,10 +117,10 @@ public class CutableMesh : MonoBehaviour
         var nextVertexIndex = vertices.Length;
         var nextTrianglesIndex = triangles.Length;
 
-        Array.Resize(ref vertices, vertices.Length + 2 * intersections.Count);
-        Array.Resize(ref uvs, uvs.Length + 2 * intersections.Count);
-        Array.Resize(ref normals, normals.Length + 2 * intersections.Count); 
-        Array.Resize(ref tangents, tangents.Length + 2 * intersections.Count); 
+        Array.Resize(ref vertices, vertices.Length + 4 * intersections.Count);
+        Array.Resize(ref uvs, uvs.Length + 4 * intersections.Count);
+        Array.Resize(ref normals, normals.Length + 4 * intersections.Count); 
+        Array.Resize(ref tangents, tangents.Length + 4 * intersections.Count); 
 
         // Each intersection generates 2 more triangles and modifies one triangle in the previous mesh,
         // so you add 2 * 3 * intersections.Count 
@@ -162,16 +162,16 @@ public class CutableMesh : MonoBehaviour
     {
         // TODO this might be a good spot to register points to project and generate new tessellation to close mesh
 
-
-        // Add new vertices to vertice array
-        var nextVertexIndex = vertexIndexStart + intersectionIndex * 2;
+        // Add new vertices to vertice array. We need to add four vertices, two per side of splitted mesh, so the resulting meshes
+        // Will be disjoint
+        var nextVertexIndex = vertexIndexStart + intersectionIndex * 4;
         vertices[nextVertexIndex]   = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
         normals[nextVertexIndex]    = triangleIntersection.p1Attrs.normal;
         uvs[nextVertexIndex]        = triangleIntersection.p1Attrs.uvs;
         normals[nextVertexIndex]    = triangleIntersection.p1Attrs.normal;
         tangents[nextVertexIndex]   = triangleIntersection.p1Attrs.tangent;
 
-        var p1Index = nextVertexIndex;
+        var p1IndexSide1 = nextVertexIndex;
         nextVertexIndex++;
 
         vertices[nextVertexIndex]   = WorldToLocal(triangleIntersection.position2);
@@ -180,8 +180,24 @@ public class CutableMesh : MonoBehaviour
         normals[nextVertexIndex]    = triangleIntersection.p2Attrs.normal;
         tangents[nextVertexIndex]   = triangleIntersection.p2Attrs.tangent;
 
+        var p2IndexSide1 = nextVertexIndex;
+        nextVertexIndex++;
+        vertices[nextVertexIndex] = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
+        normals[nextVertexIndex] = triangleIntersection.p1Attrs.normal;
+        uvs[nextVertexIndex] = triangleIntersection.p1Attrs.uvs;
+        normals[nextVertexIndex] = triangleIntersection.p1Attrs.normal;
+        tangents[nextVertexIndex] = triangleIntersection.p1Attrs.tangent;
 
-        var p2Index = nextVertexIndex;
+        var p1IndexSide2 = nextVertexIndex;
+        nextVertexIndex++;
+
+        vertices[nextVertexIndex] = WorldToLocal(triangleIntersection.position2);
+        normals[nextVertexIndex] = triangleIntersection.p2Attrs.normal;
+        uvs[nextVertexIndex] = triangleIntersection.p2Attrs.uvs;
+        normals[nextVertexIndex] = triangleIntersection.p2Attrs.normal;
+        tangents[nextVertexIndex] = triangleIntersection.p2Attrs.tangent;
+
+        var p2IndexSide2 = nextVertexIndex;
 
         // Check which vertex of previous triangle was alone in the other side of the plane
         var v0Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[triangleIntersection.v0Index]));
@@ -225,7 +241,7 @@ public class CutableMesh : MonoBehaviour
 
 
         // Update old triangle
-        var (i, j, k) = ComputeWindingOrder(p2Index, p1Index, aloneIndex, originalNormal, vertices);
+        var (i, j, k) = ComputeWindingOrder(p2IndexSide1, p1IndexSide1, aloneIndex, originalNormal, vertices);
         triangles[triangleIntersection.v0TriangleIndex] = i;
         triangles[triangleIntersection.v2TriangleIndex] = j;
         triangles[triangleIntersection.v1TriangleIndex] = k;
@@ -233,13 +249,13 @@ public class CutableMesh : MonoBehaviour
         // Create two new triangles
         //      One triangle
         var nextTriangleIndex = triangleIndexStart + 6 * intersectionIndex;
-        (i, j, k) = ComputeWindingOrder(same2Index, p1Index, p2Index, originalNormal, vertices);
+        (i, j, k) = ComputeWindingOrder(same2Index, p1IndexSide2, p2IndexSide2, originalNormal, vertices);
         triangles[nextTriangleIndex++] = i;
         triangles[nextTriangleIndex++] = j;
         triangles[nextTriangleIndex++] = k;
 
         //      Another triangle
-        (i, j, k) = ComputeWindingOrder(same2Index, same1Index, p1Index, originalNormal, vertices);
+        (i, j, k) = ComputeWindingOrder(same2Index, same1Index, p1IndexSide2, originalNormal, vertices);
         triangles[nextTriangleIndex++] = i;
         triangles[nextTriangleIndex++] = j;
         triangles[nextTriangleIndex++] = k;
