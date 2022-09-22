@@ -133,7 +133,9 @@ public class CutableMesh : MonoBehaviour
             AddTrianglesFromIntersectingTriangle(intersection, plane, ref vertices, ref uvs, ref normals, ref tangents, ref triangles, nextVertexIndex, nextTrianglesIndex, i++);
         }
 
-        // Now that we added new segments, we can split using disjoints sets
+        // Now that we added new segments, we can split using disjoints sets,
+        // so we know which vertex corresponds to each new mesh
+        var (components, nComponents) = ConnectedComponents(triangles, vertices.Length);
 
         // -- DEBUG ONLY, DELETE LATER -----------------------
         mesh.vertices = vertices;
@@ -509,6 +511,89 @@ public class CutableMesh : MonoBehaviour
         newAttrs.uvs = Vector2.Lerp(v0Attr.uvs, v1Attr.uvs, t);
 
         return newAttrs;
+    }
+
+
+    private struct DisjointSet
+    {
+        public int[] parents;
+        public int nVertices;
+
+        public DisjointSet(int nVertices)
+        {
+            parents = new int[nVertices];
+            this.nVertices = nVertices;
+
+            // Init array of parents as your own parent
+            for (int i = 0; i < nVertices; i++)
+            {
+                parents[i] = i;
+            }
+        }
+
+        /// <summary>
+        /// Get root of node i, which must be in range [0, nVertices)
+        /// </summary>
+        /// <param name="i">node whose parent you want</param>
+        public int Root(int i)
+        {
+            if (parents[i] == i)
+                return i;
+
+            // If you're not your own parent, search your parent's parent
+            var actualParent = Root(parents[i]);
+
+            // Optimization to reduce height of resulting parent tree 
+            parents[i] = actualParent;
+
+            return actualParent;
+        }
+
+        /// <summary>
+        /// Connect to subsets represented by their members i and j
+        /// </summary>
+        /// <param name="i">Member of subset 1</param>
+        /// <param name="j">Member of subset 2</param>
+        public void Merge(int i, int j)
+        {
+            // Make i be parent of j's parent
+            var jRoot = Root(j);
+            var iRoot = Root(i);
+            if (jRoot == iRoot)
+                return; // nothing to do, already in the same set
+
+            parents[jRoot] = iRoot;
+        }
+    }
+
+    /// <summary>
+    /// A disjoint sets based connected components algorithm to separate a triangle-based graph into multiple components
+    /// </summary>
+    /// <param name="triangles">array of triangles, each 3 ints is a triangle</param>
+    /// <param name="nVertices">ammount of vertices, this is the size of the returning array</param>
+    /// <returns>Array of size `nVertices`, each index corresponds to the connected component for this vertex, and the amount of components found</returns>
+    private (int[], int) ConnectedComponents(in int [] triangles, int nVertices)
+    {
+        DisjointSet disjointSet = new DisjointSet(nVertices);
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            var v1 = triangles[i];
+            var v2 = triangles[i+1];
+            var v3 = triangles[i+2];
+
+            disjointSet.Merge(v1, v2);
+            disjointSet.Merge(v1, v3);
+        }
+
+        SortedSet<int> components = new SortedSet<int>();
+
+        for(int i = 0; i < nVertices; i++)
+        {
+            var iRoot = disjointSet.Root(i); // flatten entire array of parents
+            components.Add(iRoot);
+        }
+
+        return (disjointSet.parents, components.Count);
     }
 
 
