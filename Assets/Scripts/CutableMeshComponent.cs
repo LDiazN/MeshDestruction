@@ -15,7 +15,7 @@ using UnityEngine;
 
 
 [RequireComponent(typeof(MeshFilter))]
-public class CutableMesh : MonoBehaviour
+public class CutableMeshComponent : MonoBehaviour
 {
     public struct TriangleIntersection
     {
@@ -53,8 +53,6 @@ public class CutableMesh : MonoBehaviour
     {
         _meshFilter = GetComponent<MeshFilter>();
         var mesh = _meshFilter.mesh;
-
-        
     }
 
     // Update is called once per frame
