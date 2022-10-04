@@ -52,7 +52,7 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
             var pointHomoCoords = new Vector4(point.x, point.y, point.z, 1.0f);
             var pointLocalHomoCoords = world2Local * pointHomoCoords;
 
-            points2d[i++] = new Vector2(pointLocalHomoCoords.x, pointLocalHomoCoords.z);
+            points2d[i++] = new Vector2(pointLocalHomoCoords.x, pointLocalHomoCoords.y);
         }
 
         // Create point bin from current points
@@ -85,9 +85,9 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
                     Random.Range(0.0f,1.0f)
                 );
 
-                _binIndexToColor[i++] = color;
+                _binIndexToColor[i] = color;
             }
-
+            i++;  
             Gizmos.color = color;
 
             foreach(var point in bin)

@@ -84,12 +84,12 @@ public class PointBinGrid
     {
         // Convert current position to grid space
         var posGridSpace = position - _bottomLeft;
-        var row = 0.99 * _gridSize * posGridSpace.y / GridHeight;
-        var col = 0.99 * _gridSize * posGridSpace.x / GridWidth;
+        var row = 0.99f * _gridSize * posGridSpace.y / GridHeight;
+        var col = 0.99f * _gridSize * posGridSpace.x / GridWidth;
 
         Debug.Assert(row < _gridSize && col < _gridSize, $"Point {position} is outside of grid extents");
 
-        return ((uint)row, (uint)col);
+        return ((uint) Mathf.Floor(row), (uint) Mathf.Floor(col));
     }
 
     /// <summary>
@@ -100,10 +100,9 @@ public class PointBinGrid
     public uint BinIndex(Vector2 position)
     {
         var (row, col) = ComputeGridPosition(position);
-        if (row % 2 == 0)
-            return row * _gridSize + col + 1;
-        else
-            return (row + 1) * _gridSize - col; 
+        var result = row % 2 == 0 ? row * _gridSize + col + 1 : (row + 1) * _gridSize - col;
+
+        return result -1;
     }
 
 }
