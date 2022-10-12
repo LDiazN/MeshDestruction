@@ -1,12 +1,13 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System;
 
 /// <summary>
 /// Implements a data structure to store and retrieve points easier
 /// and efficient, used to compute deluanay triangulation and constrained triangulation
 /// </summary>
-public class PointBinGrid
+public class PointBinGrid : IEnumerable<Vector3>
 {
     // Number of points to store
     private uint _nPoints;
@@ -105,4 +106,17 @@ public class PointBinGrid
         return result -1;
     }
 
+    public IEnumerator<Vector3> GetEnumerator()
+    {
+        foreach (var bin in _bins)
+        {
+            foreach (var vec in bin)
+                yield return vec;
+        }
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        throw new NotImplementedException();
+    }
 }

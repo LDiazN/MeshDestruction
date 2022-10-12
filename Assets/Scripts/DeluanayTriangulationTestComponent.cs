@@ -9,11 +9,13 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
     private MeshFilter _meshFilter;
 
     // List of points added by the user
-    private List<Vector3> _newPoints;
+    private List<Vector2> _newPoints;
 
     private PointBinGrid _pointBinGrid;
 
     private Dictionary<uint, Color> _binIndexToColor;
+
+    private DeluanayTriangulation.TriangulationResult? _result;
 
     // Start is called before the first frame update
     void Start()
@@ -21,7 +23,7 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
         _meshFilter = GetComponent<MeshFilter>();
         Debug.Assert(_meshFilter != null, "Mesh component missing");
         Debug.Assert(_meshFilter.mesh.vertices.Length == 4, "Mesh should be a quad");
-        _newPoints = new List<Vector3>();
+        _newPoints = new List<Vector2>();
         _binIndexToColor = new Dictionary<uint, Color>();
     }
 
@@ -31,33 +33,9 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
         if (Input.GetMouseButtonDown(0))
             TryAddNewPoint();
         else if (Input.GetKeyDown(KeyCode.Space))
-            CreatePointBin();
+            _result = DeluanayTriangulation.Triangulate(_newPoints.ToArray(), new List<Vector2[]>());
     }
 
-    void CreatePointBin()
-    {
-        if (_newPoints.Count <= 2)
-        {
-            Debug.LogWarning($"Can't create point bin, too few elements: {_newPoints.Count}");
-            return;
-        }
-
-        // Assume that all points lie in the same plane
-        var world2Local = transform.worldToLocalMatrix;
-        Vector2[] points2d = new Vector2[_newPoints.Count];
-
-        uint i = 0;
-        foreach(var point in _newPoints)
-        {
-            var pointHomoCoords = new Vector4(point.x, point.y, point.z, 1.0f);
-            var pointLocalHomoCoords = world2Local * pointHomoCoords;
-
-            points2d[i++] = new Vector2(pointLocalHomoCoords.x, pointLocalHomoCoords.y);
-        }
-
-        // Create point bin from current points
-        _pointBinGrid = new PointBinGrid(points2d);
-    }
 
     void OnDrawGizmos()
     {
@@ -70,36 +48,24 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
             Gizmos.DrawSphere(point, 0.1f);
         }
 
-        if (_pointBinGrid == null)
+        if (_result == null)
             return;
 
-        uint i = 0;
-        foreach (var bin in _pointBinGrid.Bins)
+        var actualResult = (DeluanayTriangulation.TriangulationResult)_result;
+        foreach(var point in actualResult.points)
         {
-            Color color;
-            if (!_binIndexToColor.TryGetValue(i, out color))
-            {
-                color = new Color(
-                    Random.Range(0.0f,1.0f),
-                    Random.Range(0.0f,1.0f),
-                    Random.Range(0.0f,1.0f)
-                );
+            Gizmos.DrawSphere(point, 0.1f);
+        }
 
-                _binIndexToColor[i] = color;
-            }
-            i++;  
-            Gizmos.color = color;
+        for(int i = 0; i < actualResult.triangles.Length; i += 3)
+        {
+            var p1 = actualResult.points[actualResult.triangles[i]];
+            var p2 = actualResult.points[actualResult.triangles[i+1]];
+            var p3 = actualResult.points[actualResult.triangles[i+2]];
 
-            foreach(var point in bin)
-            {
-                // We have to convert from 2d point to 3d and then to world coordinates
-                var pointHomoLocalCoords = new Vector4(point.x, point.y, 0.0f, 1.0f);
-                var pointHomoWorldCoords = transform.localToWorldMatrix * pointHomoLocalCoords;
-                var pointWorld3D = new Vector3(pointHomoWorldCoords.x, pointHomoWorldCoords.y, pointHomoWorldCoords.z);
-
-                Gizmos.DrawSphere(pointWorld3D, 0.1f);
-            }
-
+            Gizmos.DrawLine(p1, p2);
+            Gizmos.DrawLine(p2, p3);
+            Gizmos.DrawLine(p3, p1);
         }
     }
 
