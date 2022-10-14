@@ -77,7 +77,6 @@ public class DeluanayTriangulation
         for(uint i = 0; i < pointsToNormalize.Length; i++)
             normalizedPoints[i] = (1/D) * (pointsToNormalize[i] - minPoint);
 
-
         PointNormalizationResult result = new PointNormalizationResult();
         result.normalizedPoints = normalizedPoints;
         result.minY = minY;

@@ -16,11 +16,12 @@ public class DeluanayTriangleSet
         public int[] vertices;
         public int[] adjacents;
 
-        public DeluanayTriangle(int v0, int v1, int v2, int adj0, int adj1, int adj2)
+        public DeluanayTriangle(int v0 = 0, int v1 = 0, int v2 = 0, int adj0 = -1, int adj1 = -1, int adj2 = -1)
         {
             vertices = new int[3] { v0, v1, v2 };
             adjacents = new int[3] { adj0, adj1, adj2 };
         }
+
     }
 
     /// <summary>
@@ -140,11 +141,31 @@ public class DeluanayTriangleSet
         SetDataOfTriangle(t2Index, T2);
         SetDataOfTriangle(t0Index, T0);
 
-        _recentlyAddedTriangles.Push(t0Index);
-        _recentlyAddedTriangles.Push(t1Index);
-        _recentlyAddedTriangles.Push(t2Index);
+        // now we need to update neighbors of t1 and t2 so they know who is their new neighbor
+        if (T1.adjacents[1] != -1)
+            for (int i = 0; i < 3; i++)
+            {
+                var adjI = 3 * T1.adjacents[1] + i;
+                if (_adjacentTriangles[adjI] == t0Index)
+                    _adjacentTriangles[adjI] = t1Index;
+            }
+        if (T2.adjacents[1] != -1)
+            for (int i = 0; i < 3; i++)
+            {
+                var adjI = 3 * T2.adjacents[1] + i;
+                if (_adjacentTriangles[adjI] == t0Index)
+                    _adjacentTriangles[adjI] = t2Index;
+            }
 
-        // TODO we still need to check deluanay condition
+        if (T0.adjacents[1] != -1)
+            _recentlyAddedTriangles.Push(t0Index);
+        if (T1.adjacents[1] != -1)
+            _recentlyAddedTriangles.Push(t1Index);
+        if (T2.adjacents[1] != -1)
+            _recentlyAddedTriangles.Push(t2Index);
+
+        _lastAddedTriangle = t2Index;
+        PropagateEdgeSwapping();
     }
 
     /// <summary>
@@ -162,7 +183,6 @@ public class DeluanayTriangleSet
         _adjacentTriangles.Add(-1);
         _adjacentTriangles.Add(-1);
         _lastAddedTriangle = 0;
-        _recentlyAddedTriangles.Push(0);
         _currentPointCount = 3;
     }
     
@@ -258,4 +278,114 @@ public class DeluanayTriangleSet
         _adjacentTriangles[triangleIndex * 3 + 2] = triangle.adjacents[2];
     }
 
+    /// <summary>
+    /// Check deluanay condition in the triangle formed by v0,v1,v2 and the point p. This is, check if p is outside the 
+    /// circumcircle formed by the triangle, specified in CCW order. Computed using the formula from here: 
+    /// https://en.wikipedia.org/wiki/Delaunay_triangulation
+    /// </summary>
+    /// <param name="v0">First Vertex</param>
+    /// <param name="v1">Second Vertex</param>
+    /// <param name="v2">Third Vertex</param>
+    /// <param name="p">Point to check if it's inside the triangle</param>
+    /// <returns>true triangle and point match deluanay condition. This is, when p is outside the circumcircle. false otherwise</returns>
+    static bool CheckDeluanayCondition(in Vector2 v0, in Vector2 v1, in Vector2 v2, in Vector2 p)
+    {
+        var A = v0;
+        var B = v1;
+        var C = v2;
+        var D = p;
+
+        var mat = new Matrix4x4(
+                new Vector4(A.x, B.x, C.x, D.x), 
+                new Vector4(A.y, B.y, C.y, D.y),
+                new Vector4(A.x*A.x + A.y*A.y, B.x*B.x + B.y*B.y, C.x*C.x + C.y*C.y, D.x*D.x + D.y*D.y),
+                Vector4.one
+            );
+
+        return mat.determinant > 0;
+    }
+
+    /// <summary>
+    /// Try to propagate edge swapping according to the stack of recently added triangles
+    /// </summary>
+    void PropagateEdgeSwapping()
+    {
+        DeluanayTriangle triangle = new DeluanayTriangle(0,0,0, -1, -1, -1);
+        DeluanayTriangle oppositeTriangle = new DeluanayTriangle(0,0,0, -1, -1, -1);
+
+        while (_recentlyAddedTriangles.Count != 0)
+        {
+            var nextTriangle = _recentlyAddedTriangles.Pop(); // Ti
+            GetDataOfTriangle(nextTriangle, ref triangle);
+            var Ta = triangle.adjacents[1];
+            if (Ta == -1)
+                continue; // there's no opposite triangle, continue
+            GetDataOfTriangle(Ta, ref oppositeTriangle); // Ta
+
+            // Try to check if this triangle is 
+            if (CheckDeluanayCondition(
+                _vertexPositions[oppositeTriangle.vertices[0]], 
+                _vertexPositions[oppositeTriangle.vertices[1]], 
+                _vertexPositions[oppositeTriangle.vertices[2]], 
+                _vertexPositions[triangle.vertices[0]])
+            )
+                continue;
+
+            // Now that we know that we need an edge swapping, we have to gather other edges of the 
+            // adjacent triangles to push them in the stack and propagate edge swapping
+            int commonEdgeIndex = -1; // Ea
+            for (int i = 0; i < 3; i++)
+                if (oppositeTriangle.adjacents[i] == nextTriangle)
+                    commonEdgeIndex = i;
+
+            int Va = (commonEdgeIndex + 2) % 3;
+            int Vi = 0;
+
+            // Sanity check
+            Debug.Assert(commonEdgeIndex != -1, "Inconsistent adjacent triangle, one of the sides should be nextTriangle");
+
+            // Stack neighboring triangles
+            var nextTriangleToPush = oppositeTriangle.adjacents[(commonEdgeIndex + 1) % 3];
+            if (nextTriangleToPush != -1)
+                _recentlyAddedTriangles.Push(nextTriangleToPush);
+            nextTriangleToPush = oppositeTriangle.adjacents[(commonEdgeIndex + 2) % 3];
+            if (nextTriangleToPush != -1)
+                _recentlyAddedTriangles.Push(nextTriangleToPush);
+
+            // Perform edge swapping
+            triangle.vertices[(Vi + 1) % 3] = oppositeTriangle.vertices[Va];
+            oppositeTriangle.vertices[commonEdgeIndex] = triangle.vertices[Vi];
+            oppositeTriangle.adjacents[commonEdgeIndex] = triangle.adjacents[Vi];
+            triangle.adjacents[Vi] = Ta;
+            triangle.adjacents[(Vi + 1) % 3] = oppositeTriangle.adjacents[Va];
+            oppositeTriangle.adjacents[Va] = nextTriangle;
+
+
+            SetDataOfTriangle(Ta, oppositeTriangle);
+            SetDataOfTriangle(nextTriangle, triangle);
+
+            // Swap edges with neighbor
+            var Tb = triangle.adjacents[(Vi + 1) % 3];
+            var Tc = oppositeTriangle.adjacents[commonEdgeIndex];
+
+            // Search neighbor with out dated adjacent and update it
+            if (Tb != -1)
+                for (int i = 0; i < 3; i++)
+                {
+                    var index = 3 * Tb + i;
+                    if (_adjacentTriangles[index] == Ta)
+                        _adjacentTriangles[index] = nextTriangle;
+                }
+            // Search neighbor with out dated adjacent and update it
+            if (Tc != -1)
+                for (int i = 0; i < 3; i++)
+                {
+                    var index = 3 * Tc + i;
+                    if (_adjacentTriangles[index] == nextTriangle)
+                        _adjacentTriangles[index] = Ta;
+                }
+
+
+        }
+    }
 }
