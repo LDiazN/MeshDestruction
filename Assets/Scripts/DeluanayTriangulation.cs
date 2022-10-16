@@ -32,8 +32,17 @@ public class DeluanayTriangulation
     {
         var pointNormalization = NormalizePoints(pointsToTriangulate);
         var pointBinGrid = new PointBinGrid(pointNormalization.normalizedPoints);
-        var triangleSet = new DeluanayTriangleSet((uint) pointsToTriangulate.Length);
-        
+        var triangleSet = new DeluanayTriangleSet((uint) pointsToTriangulate.Length, holes.Count); 
+
+        // Normalize holes using the same normalization process for the input points
+        var D = Mathf.Max(pointNormalization.width, pointNormalization.height);
+        var minPoint = new Vector2(pointNormalization.minX, pointNormalization.minY);
+        List<Vector2[]> normalizedHoles = new(holes.Count);
+        for(int i = 0; i < normalizedHoles.Count; i++)
+        {
+            normalizedHoles[i] = NormalizePoints(D, minPoint, holes[i]);
+        }
+
         foreach(var point in pointBinGrid)
             triangleSet.AddPoint(point);
 
@@ -52,7 +61,6 @@ public class DeluanayTriangulation
     {
         // Search for min and max values
         float minX, maxX, minY, maxY;
-        Vector2[] normalizedPoints = new Vector2[pointsToNormalize.Length];
 
         // Init extreme values
         minX = minY = float.MaxValue;
@@ -73,9 +81,7 @@ public class DeluanayTriangulation
         float D = Mathf.Max(width, height);
         Vector2 minPoint = new Vector2(minX, minY);
 
-        // Normalize points
-        for(uint i = 0; i < pointsToNormalize.Length; i++)
-            normalizedPoints[i] = (1/D) * (pointsToNormalize[i] - minPoint);
+        Vector2[] normalizedPoints = NormalizePoints(D, minPoint, pointsToNormalize);
 
         PointNormalizationResult result = new PointNormalizationResult();
         result.normalizedPoints = normalizedPoints;
@@ -102,5 +108,13 @@ public class DeluanayTriangulation
         return result;
     }
 
+    private static Vector2[] NormalizePoints(float D,in Vector2 minPoint, in Vector2[] pointsToNormalize)
+    {
+        var n = pointsToNormalize.Length;
+        var result = new Vector2[n];
+        for (int i = 0; i < n; i++)
+            result[i] = 1 / D *  (pointsToNormalize[i] - minPoint);
 
+        return result;
+    }
 }

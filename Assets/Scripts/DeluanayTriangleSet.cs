@@ -72,9 +72,19 @@ public class DeluanayTriangleSet
     /// </summary>
     private Stack<int> _recentlyAddedTriangles;
 
+    /// <summary>
+    /// How many triangles are currently stored
+    /// </summary>
     private uint TriangleCount { get { return (uint) _triangles.Count / 3; } }
 
-    public DeluanayTriangleSet(uint nPoints)
+    /// <summary>
+    /// Array of holes indices, we use this to control which points belong to which hole
+    /// </summary>
+    private List<int>[] _holesIndices; 
+
+    public int HoleCount { get { return _holesIndices.Length; } }
+
+    public DeluanayTriangleSet(uint nPoints, int nHoles)
     {
         // Init containers
         _vertexPositions = new Vector2[nPoints + 3];
@@ -82,10 +92,23 @@ public class DeluanayTriangleSet
         _adjacentTriangles = new List<int>();
         _recentlyAddedTriangles = new Stack<int>();
         InitFirstTriangle();
+
+        // Create holes
+        _holesIndices = new List<int>[nHoles];
+        for (int i = 0; i < nHoles; i++)
+            _holesIndices[i] = new List<int>();
     }
 
-    public void AddPoint(in Vector2 point)
+    /// <summary>
+    /// Try to add a point to the triangulation. This function is guaranteed to keep a valid triangulation
+    /// after each point is added
+    /// </summary>
+    /// <param name="point">new point to add</param>
+    /// <param name="holeNum">if this point belongs to a hole. If < 0, it means that it isn't, and otherwise ti belongs to a hole with index `holeNum`</param>
+    public void AddPoint(in Vector2 point, int holeNum = -1)
     {
+        Debug.Assert(holeNum < HoleCount, "Hole number out of range");
+
         // Find a triangle containing this point, it must exists before we can proceed
         DeluanayTriangle? maybeTriangle;
         int t0Index;
@@ -103,6 +126,10 @@ public class DeluanayTriangleSet
         // Add point 
         int newPointIndex = (int)_currentPointCount;
         _vertexPositions[_currentPointCount++] = point;
+
+        // Add index to hole if necessary
+        if (holeNum > 0)
+            _holesIndices[holeNum].Add(newPointIndex);
 
         // Create two triangles beside this
         int t1Index = (int)TriangleCount;
@@ -384,8 +411,6 @@ public class DeluanayTriangleSet
                     if (_adjacentTriangles[index] == nextTriangle)
                         _adjacentTriangles[index] = Ta;
                 }
-
-
         }
     }
 }

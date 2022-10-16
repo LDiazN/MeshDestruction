@@ -11,6 +11,9 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
     // List of points added by the user
     private List<Vector2> _newPoints;
 
+    // List of points corresponding to holes
+    private List<Vector2> _holePoints;
+
     private PointBinGrid _pointBinGrid;
 
     private Dictionary<uint, Color> _binIndexToColor;
@@ -24,6 +27,7 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
         Debug.Assert(_meshFilter != null, "Mesh component missing");
         Debug.Assert(_meshFilter.mesh.vertices.Length == 4, "Mesh should be a quad");
         _newPoints = new List<Vector2>();
+        _holePoints = new List<Vector2>();
         _binIndexToColor = new Dictionary<uint, Color>();
     }
 
@@ -32,8 +36,10 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
     {
         if (Input.GetMouseButtonDown(0))
             TryAddNewPoint();
+        else if (Input.GetMouseButtonDown(1))
+            TryAddNewPoint(true);
         else if (Input.GetKeyDown(KeyCode.Space))
-            _result = DeluanayTriangulation.Triangulate(_newPoints.ToArray(), new List<Vector2[]>());
+            _result = DeluanayTriangulation.Triangulate(_newPoints.ToArray(), new List<Vector2[]>{_holePoints.ToArray()});
     }
 
 
@@ -48,9 +54,16 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
             Gizmos.DrawSphere(point, 0.1f);
         }
 
+        Gizmos.color = Color.blue;
+        foreach(var point in _holePoints)
+        {
+            Gizmos.DrawSphere(point, 0.1f);
+        }
+
         if (_result == null)
             return;
 
+        Gizmos.color = Color.red;
         var actualResult = (DeluanayTriangulation.TriangulationResult)_result;
         foreach(var point in actualResult.points)
         {
@@ -72,7 +85,7 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
     /// <summary>
     /// Try to add a new point based on mouse input if inside the right region
     /// </summary>
-    private void TryAddNewPoint()
+    private void TryAddNewPoint(bool isHole = false)
     {
         var maybeNewPoint = GetNewPointFromMouse();
 
@@ -82,7 +95,11 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
 
         Vector3 newPoint = maybeNewPoint ?? Vector3.zero;
 
-        _newPoints.Add(newPoint);
+        // Check if it's  hole before adding it to the array of points
+        if (isHole)
+            _holePoints.Add(newPoint);
+        else
+            _newPoints.Add(newPoint);
 
         Debug.Log($"Addning new point. Current point count: {_newPoints.Count}");
     }
