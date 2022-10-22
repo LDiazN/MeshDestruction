@@ -413,4 +413,155 @@ public class DeluanayTriangleSet
                 }
         }
     }
+
+    void FixConstrainedEdges()
+    {
+        DeluanayTriangle triangle = new DeluanayTriangle();
+        bool[] intersectedEdges = new bool[3] {false, false, false};
+
+        foreach(var hole in _holesIndices)
+        {
+            for(int i = 0; i < hole.Count; i += 1)
+            {
+                var constEdgeStart = hole[i];
+                var constEdgeEnd = hole[(i+1) % hole.Count];
+
+                var constEdgeStartPoint = _vertexPositions[constEdgeStart];
+                var constEdgeEndPoint = _vertexPositions[constEdgeEnd];
+
+                // Search starting triangle. This is a triangle such that 
+                // one of the vertices is the current edgeStart, and other is the edgeEnd
+                // or one of the vertices is edgeStart and one of the sides intersects this edge
+
+                // We want the first tree to iterate over in this variable
+                var nextTri = -1;
+                List<(int, int)> intersectingEdges = new List<(int, int)>();
+                for(int tri = 0; tri < _triangles.Count; tri += 3)
+                {
+                    GetDataOfTriangle(tri, ref triangle);
+
+                    var vi = -1;
+
+                    // Skip if none of them is edgeStart
+                    if (triangle.vertices[0] == constEdgeStart)
+                        vi = 0;
+                    else if (triangle.vertices[1] == constEdgeStart)
+                        vi = 1;
+                    else if (triangle.vertices[2] == constEdgeStart)
+                        vi = 2;
+                    else
+                        continue;
+
+                    // Sanity check
+                    Debug.Assert(vi != -1, "Should only get here if you found vi");
+
+                    var vi1 = (vi + 1) % 3;
+                    var vi2 = (vi + 2) % 3;
+
+                    var viVert = _vertexPositions[triangle.vertices[vi]];
+                    var vi1Vert = _vertexPositions[triangle.vertices[vi1]];
+                    var vi2Vert = _vertexPositions[triangle.vertices[vi2]];
+                    var edgeEndVert = _vertexPositions[triangle.vertices[constEdgeEnd]];
+
+                    var E1 = vi1Vert - viVert;
+                    var E2 = viVert - vi2Vert;
+
+                    // If in the left side of E1, E2 at the same time...
+                    // TODO double check this innequalities
+                    if (Cross2D(E1, edgeEndVert - viVert) >= 0 && Cross2D(E2, edgeEndVert - vi2Vert) >= 0)
+                    {
+                        nextTri = tri;
+                        break;
+                    }
+                }
+
+                // Sanity check
+                Debug.Assert(nextTri != -1, "There should be at the list one triangle intersecting");
+
+                // While next tri is not the one containing edgeEnd
+                GetDataOfTriangle(nextTri, ref triangle);
+                while (triangle.vertices[0] != constEdgeEnd && triangle.vertices[1] != constEdgeEnd && triangle.vertices[2] != constEdgeEnd)
+                {
+                    intersectedEdges[0] = intersectedEdges[1] = intersectedEdges[2] = false;
+
+                    var Et = -1;
+                    for(int Ei = 0; Ei < 3; Ei++)
+                    {
+                        // Check if this edge is in right side (opposite side as before)
+                        var edgeStartVert = _vertexPositions[triangle.vertices[i]];
+                        var edgeEndVert = _vertexPositions[triangle.vertices[(i+1) % 3]];
+
+                        // Remember that edgeEndPoint is related to the hole, edgeEndVert is related
+                        // to the current edge in this triangle
+                        if (Cross2D(edgeEndVert - edgeStartVert, constEdgeEndPoint - edgeStartVert) <= 0)
+                            Et = Ei;
+                        else
+                            continue;
+
+                        // Check intersection between this edge and the constrained edge
+                        if (!CheckSegmentIntersection(edgeStartVert, edgeEndVert, constEdgeStartPoint, constEdgeEndPoint))
+                            continue;
+
+                        // Since they do intersect, we register edges, set next tri
+                        intersectingEdges.Add((triangle.vertices[i], triangle.vertices[(i+1) % 3]));
+                        intersectedEdges[i] = true;
+                        intersectedEdges[(i + 1) % 3] = true;
+                        nextTri = triangle.adjacents[Ei];
+                        break;
+                    }
+
+                    // If no intersection...
+                    if (!intersectedEdges[0] && !intersectedEdges[1] && !intersectedEdges[2])
+                        nextTri = Et;
+
+
+                    GetDataOfTriangle(nextTri, ref triangle);
+                }
+
+                
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if the two line segments specified by starting point p1, end point p2,
+    /// starting point q1, and end point q2 intersect in a single point. Implemented according 
+    /// to this post: https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
+    /// </summary>
+    /// <param name="p1">Starting point of line segment 1</param>
+    /// <param name="p2">End point of line segment 1</param>
+    /// <param name="q1">Starting point of line segment 2</param>
+    /// <param name="q2">End point of line segment 2</param>
+    /// <returns></returns>
+    private static bool CheckSegmentIntersection(in Vector2 p1, in Vector2 p2, in Vector2 q1, in Vector2 q2)
+    {
+
+        var p = p1;
+        var r = p2 - p1;
+
+        var q = q1;
+        var s = q2 - q1;
+
+        var rXs = Cross2D(r, s);
+        var q_pXr = Cross2D(q - p, r);
+
+        const float delta = 0.0001f;
+
+
+        if (
+            Mathf.Abs(rXs) < delta && Mathf.Abs(q_pXr) < delta || // Collinear
+            Mathf.Abs(rXs) < delta  // Parallel
+
+            ) 
+            return false;
+
+        var t = Cross2D(q - p, (1.0f / (Cross2D(r, s)) * s));
+        var u = Cross2D(q - p, (1/0f / Cross2D(r,s)) * r);
+
+        // If values are in valid range, they intersect. Otherwise, 
+        // they are not parallel but they don't intersect
+        return 0 <= t && t <= 1 && 0 <= u && u <= 1;
+    }
+
+    private static float Cross2D(in Vector2 a, in Vector2 b) => a.x * b.y - a.y * b.x;
 }
