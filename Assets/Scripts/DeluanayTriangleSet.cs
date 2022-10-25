@@ -84,10 +84,18 @@ public class DeluanayTriangleSet
 
     public int HoleCount { get { return _holesIndices.Length; } }
 
-    public DeluanayTriangleSet(uint nPoints, int nHoles)
+    public DeluanayTriangleSet(uint nPoints, List<int> holeSizes)
     {
         // Init containers
-        _vertexPositions = new Vector2[nPoints + 3];
+        var nHoles = holeSizes.Count;
+
+        // Sum size of each hole
+        var sumOfHoleSizes = 0;
+
+        foreach (var size in holeSizes)
+            sumOfHoleSizes += size;
+
+        _vertexPositions = new Vector2[nPoints + 3 + sumOfHoleSizes];
         _triangles = new List<int>();
         _adjacentTriangles = new List<int>();
         _recentlyAddedTriangles = new Stack<int>();
@@ -128,7 +136,7 @@ public class DeluanayTriangleSet
         _vertexPositions[_currentPointCount++] = point;
 
         // Add index to hole if necessary
-        if (holeNum > 0)
+        if (holeNum >= 0)
             _holesIndices[holeNum].Add(newPointIndex);
 
         // Create two triangles beside this
@@ -414,17 +422,17 @@ public class DeluanayTriangleSet
         }
     }
 
-    void FixConstrainedEdges()
+    public void FixConstrainedEdges()
     {
-        DeluanayTriangle triangle = new DeluanayTriangle();
+        DeluanayTriangle triangle = new DeluanayTriangle(0,0,0, -1, -1, -1);
         bool[] intersectedEdges = new bool[3] {false, false, false};
 
         foreach(var hole in _holesIndices)
         {
-            for(int i = 0; i < hole.Count; i += 1)
+            for(int holeIndex = 0; holeIndex < hole.Count; holeIndex += 1)
             {
-                var constEdgeStart = hole[i];
-                var constEdgeEnd = hole[(i+1) % hole.Count];
+                var constEdgeStart = hole[holeIndex];
+                var constEdgeEnd = hole[(holeIndex+1) % hole.Count];
 
                 var constEdgeStartPoint = _vertexPositions[constEdgeStart];
                 var constEdgeEndPoint = _vertexPositions[constEdgeEnd];
@@ -433,10 +441,10 @@ public class DeluanayTriangleSet
                 // one of the vertices is the current edgeStart, and other is the edgeEnd
                 // or one of the vertices is edgeStart and one of the sides intersects this edge
 
-                // We want the first tree to iterate over in this variable
+                // We want the first tri to iterate over in this variable
                 var nextTri = -1;
                 List<(int, int)> intersectingEdges = new List<(int, int)>();
-                for(int tri = 0; tri < _triangles.Count; tri += 3)
+                for(int tri = 0; tri < TriangleCount; tri ++)
                 {
                     GetDataOfTriangle(tri, ref triangle);
 
@@ -461,14 +469,14 @@ public class DeluanayTriangleSet
                     var viVert = _vertexPositions[triangle.vertices[vi]];
                     var vi1Vert = _vertexPositions[triangle.vertices[vi1]];
                     var vi2Vert = _vertexPositions[triangle.vertices[vi2]];
-                    var edgeEndVert = _vertexPositions[triangle.vertices[constEdgeEnd]];
+                    var edgeEndVert = _vertexPositions[constEdgeEnd];
 
                     var E1 = vi1Vert - viVert;
                     var E2 = viVert - vi2Vert;
 
                     // If in the left side of E1, E2 at the same time...
                     // TODO double check this innequalities
-                    if (Cross2D(E1, edgeEndVert - viVert) >= 0 && Cross2D(E2, edgeEndVert - vi2Vert) >= 0)
+                    if (Cross2D(E1, edgeEndVert - viVert) <= 0 && Cross2D(E2, edgeEndVert - vi2Vert) <= 0)
                     {
                         nextTri = tri;
                         break;
@@ -488,8 +496,8 @@ public class DeluanayTriangleSet
                     for(int Ei = 0; Ei < 3; Ei++)
                     {
                         // Check if this edge is in right side (opposite side as before)
-                        var edgeStartVert = _vertexPositions[triangle.vertices[i]];
-                        var edgeEndVert = _vertexPositions[triangle.vertices[(i+1) % 3]];
+                        var edgeStartVert = _vertexPositions[triangle.vertices[Ei]];
+                        var edgeEndVert = _vertexPositions[triangle.vertices[(Ei+1) % 3]];
 
                         // Remember that edgeEndPoint is related to the hole, edgeEndVert is related
                         // to the current edge in this triangle
@@ -503,16 +511,16 @@ public class DeluanayTriangleSet
                             continue;
 
                         // Since they do intersect, we register edges, set next tri
-                        intersectingEdges.Add((triangle.vertices[i], triangle.vertices[(i+1) % 3]));
-                        intersectedEdges[i] = true;
-                        intersectedEdges[(i + 1) % 3] = true;
+                        intersectingEdges.Add((triangle.vertices[holeIndex], triangle.vertices[(Ei+1) % 3]));
+                        intersectedEdges[Ei] = true;
+                        intersectedEdges[(Ei + 1) % 3] = true;
                         nextTri = triangle.adjacents[Ei];
                         break;
                     }
 
                     // If no intersection...
                     if (!intersectedEdges[0] && !intersectedEdges[1] && !intersectedEdges[2])
-                        nextTri = Et;
+                        nextTri = triangle.adjacents[Et];
 
 
                     GetDataOfTriangle(nextTri, ref triangle);

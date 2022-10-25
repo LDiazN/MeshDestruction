@@ -32,19 +32,34 @@ public class DeluanayTriangulation
     {
         var pointNormalization = NormalizePoints(pointsToTriangulate);
         var pointBinGrid = new PointBinGrid(pointNormalization.normalizedPoints);
-        var triangleSet = new DeluanayTriangleSet((uint) pointsToTriangulate.Length, holes.Count); 
+        
+        // Count how many vertex per hole
+        List<int> holeSizes = new();
+        foreach (var hole in holes)
+            holeSizes.Add(hole.Length);
+
+        var triangleSet = new DeluanayTriangleSet((uint) pointsToTriangulate.Length, holeSizes); 
 
         // Normalize holes using the same normalization process for the input points
         var D = Mathf.Max(pointNormalization.width, pointNormalization.height);
         var minPoint = new Vector2(pointNormalization.minX, pointNormalization.minY);
-        List<Vector2[]> normalizedHoles = new(holes.Count);
-        for(int i = 0; i < normalizedHoles.Count; i++)
+        List<Vector2[]> normalizedHoles = new();
+        for(int i = 0; i < holes.Count; i++)
         {
-            normalizedHoles[i] = NormalizePoints(D, minPoint, holes[i]);
+            normalizedHoles.Add(NormalizePoints(D, minPoint, holes[i]));
         }
 
+        // Add points
         foreach(var point in pointBinGrid)
             triangleSet.AddPoint(point);
+
+        // Add hole points
+        for (int i = 0; i < normalizedHoles.Count; i++)
+            foreach(var point in normalizedHoles[i])
+                triangleSet.AddPoint(point, i);
+
+        // Fix constrained edges
+        triangleSet.FixConstrainedEdges();
 
         pointNormalization.normalizedPoints = triangleSet.VertexPositions;
         var vertices = DenormalizePoints(pointNormalization);
