@@ -223,7 +223,7 @@ public class DeluanayTriangulation
             Vector2 startToEnd = points[end.Value] - points[start.Value];
             Vector2 startToNext = points[nextNode.Value] - points[start.Value];
 
-            if (!InRightSideOf(startToEnd, startToNext) && 
+            if (!InLeftSideOf(startToEnd, startToNext) && 
                 IsVisible(polygonIndex, points, nextNode.Value, start.Value) && 
                 IsVisible(polygonIndex, points, nextNode.Value, end.Value))
             {
@@ -399,6 +399,13 @@ public class DeluanayTriangulation
             || (Mathf.Abs(df2) <= delta && InSegment(i2, f2, f1));
     }
 
+    /// <summary>
+    /// Check if p is inside the segment defined by i-f
+    /// </summary>
+    /// <param name="i">start of segment</param>
+    /// <param name="f">end of segment</param>
+    /// <param name="p">point to check if it's inside of segment `if` exclusive (don't consider i, f) </param>
+    /// <returns>true if p is in segment `if`, but it's not i or f. False otherwise.</returns>
     private static bool InSegment(Vector2 i, Vector2 f, Vector2 p)
     {
         return Mathf.Min(i.x, f.x) < p.x && p.x < Mathf.Max(i.x, f.x) &&
@@ -416,5 +423,5 @@ public class DeluanayTriangulation
     /// <param name="refVec">Reference vector from which we want to check if `vec` if in the right side</param>
     /// <param name="vec">Vector we want to check if is in the right side of `refVec`</param>
     /// <returns></returns>
-    private static bool InRightSideOf(Vector2 refVec, Vector2 vec) => Cross2D(vec, refVec) > 0;
+    private static bool InLeftSideOf(Vector2 refVec, Vector2 vec) => Cross2D(vec, refVec) < 0;
 }
