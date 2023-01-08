@@ -223,7 +223,7 @@ public class DeluanayTriangulation
             Vector2 startToEnd = points[end.Value] - points[start.Value];
             Vector2 startToNext = points[nextNode.Value] - points[start.Value];
 
-            if (!InLeftSideOf(startToEnd, startToNext) && 
+            if (InLeftSideOf(startToEnd, startToNext) && 
                 IsVisible(polygonIndex, points, nextNode.Value, start.Value) && 
                 IsVisible(polygonIndex, points, nextNode.Value, end.Value))
             {
