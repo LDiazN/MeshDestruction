@@ -39,13 +39,21 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
         else if (Input.GetMouseButtonDown(1))
             TryAddNewPoint(true);
         else if (Input.GetKeyDown(KeyCode.Space))
+        {
             _result = DeluanayTriangulation.Triangulate(_newPoints.ToArray(), new List<Vector2[]>{_holePoints.ToArray()});
+            Debug.Log("Issuing triangulation request...");
+        }
+        else if (Input.GetKeyDown(KeyCode.C))
+        {
+            _newPoints.Clear();
+            _holePoints.Clear();
+        }    
     }
 
 
     void OnDrawGizmos()
     {
-        if (_newPoints == null)
+        if (_newPoints == null || _newPoints.Count == 0)
             return;
 
         Gizmos.color = Color.red;
@@ -60,7 +68,7 @@ public class DeluanayTriangulationTestComponent : MonoBehaviour
             Gizmos.DrawSphere(point, 0.1f);
         }
 
-        if (_result == null)
+        if (_result == null || _holePoints.Count > 0)
             return;
 
         Gizmos.color = Color.red;

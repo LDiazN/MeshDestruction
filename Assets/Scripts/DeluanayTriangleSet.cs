@@ -2,7 +2,6 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-
 /// <summary>
 /// Set of triangles data structure required to implement deluanay triangulation
 /// </summary>
@@ -525,8 +524,6 @@ public class DeluanayTriangleSet
 
                     GetDataOfTriangle(nextTri, ref triangle);
                 }
-
-                
             }
         }
     }
