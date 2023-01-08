@@ -33,14 +33,20 @@ public class DeluanayTriangulation
     /// </summary>
     /// <param name="pointsToTriangulate"></param>
     /// <param name="holes"></param>
-    /// <returns></returns>
-    public static TriangulationResult Triangulate(in Vector2[] pointsToTriangulate, in List<Vector2[]> holes)
+    /// <param name="isCounterClockWise"></param>
+    /// <returns>Triangulation result object specifying desired data</returns>
+    public static TriangulationResult Triangulate(in Vector2[] pointsToTriangulate, in List<Vector2[]> holes, bool isCounterClockWise = true)
     {
         TriangulationResult result;
         // Create linked list with starting polygon
         LinkedList<int> polygon = new LinkedList<int>();
-        for (int i = 0; i < pointsToTriangulate.Length; i++)
-            polygon.AddLast(i);
+
+        if (isCounterClockWise)
+            for (int i = 0; i < pointsToTriangulate.Length; i++)
+                polygon.AddLast(i);
+        else
+            for (int i = pointsToTriangulate.Length-1; i > 0 ; i--)
+                polygon.AddLast(i);
 
         List<Vector3Int> results = new List<Vector3Int>();
         TriangulatePSLG(polygon, pointsToTriangulate, ref results);
@@ -164,7 +170,14 @@ public class DeluanayTriangulation
         return result;
     }
 
-
+    /// <summary>
+    /// This function will try to triangulate a polygon specified in COUNTER CLOCKWISE ORDER. This is not garanteed 
+    /// to work with polygons specified in clockwise order. This is an implementation of the algorithm in the following
+    /// paper to triangulate a PSLG https://cg.cs.uni-bonn.de/backend/v1/files/publications/klein-1996-construction.pdf
+    /// </summary>
+    /// <param name="polygonIndex">List of indices specifying the polygon</param>
+    /// <param name="points">Array of points specifying the actual locatios refered by points in the polygon</param>
+    /// <param name="outTriangles">Resulting triangles created by this triangulation</param>
     private static void TriangulatePSLG(LinkedList<int> polygonIndex, in Vector2[] points, ref List<Vector3Int> outTriangles)
     {
 
@@ -200,8 +213,18 @@ public class DeluanayTriangulation
         var nextNode = polygonIndex.First;
         while(nextNode != null)
         {
+            // Ignore nodes that we already know
+            if (nextNode.Value == start.Value || nextNode.Value == end.Value)
+            {
+                nextNode = nextNode.Next;
+                continue;
+            }
 
-            if (IsVisible(polygonIndex, points, nextNode.Value, start.Value) && 
+            Vector2 startToEnd = points[end.Value] - points[start.Value];
+            Vector2 startToNext = points[nextNode.Value] - points[start.Value];
+
+            if (!InRightSideOf(startToEnd, startToNext) && 
+                IsVisible(polygonIndex, points, nextNode.Value, start.Value) && 
                 IsVisible(polygonIndex, points, nextNode.Value, end.Value))
             {
                 // Now try to check if this node matches the deluanay condition 
@@ -214,7 +237,6 @@ public class DeluanayTriangulation
                 var node = polygonIndex.First;
                 while(node != null && allDeluanay)
                 {
-                    Vector2 p = points[node.Value];
                     // If this point is part of the original triangle, then just dontinue
                     if (node.Value == start.Value || node.Value == end.Value || node.Value == nextNode.Value)
                     {
@@ -222,6 +244,7 @@ public class DeluanayTriangulation
                         continue;
                     }    
 
+                    Vector2 p = points[node.Value];
                     allDeluanay = CheckDeluanayCondition(startPoint, endPoint, possiblePoint, p);
                     node = node.Next;
                 }
@@ -242,6 +265,7 @@ public class DeluanayTriangulation
 
             nextNode = nextNode.Next;
         }
+        Debug.LogError("Couldn't triangulate PSLG properly");
 
     }
 
@@ -260,15 +284,36 @@ public class DeluanayTriangulation
     /// <summary>
     /// Check if point in `toIndex` is visible from point in `fromIndex`
     /// </summary>
-    /// <param name="points">Array of points where to look for visibility </param>
-    /// <param name="start"></param>
-    /// <param name="end"></param>
-    /// <param name="fromIndex"></param>
-    /// <param name="toIndex"></param>
+    /// <param name="polygon">Polygon specified as a linked list of vertices</param>
+    /// <param name="points">Actual point data</param>
+    /// <param name="startIndex">starting point of line of sight</param>
+    /// <param name="toIndex">end point of line of sight</param>
     /// <returns></returns>
     private static bool IsVisible(LinkedList<int> polygon, in Vector2[] points, int startIndex,  int toIndex)
     {
-        Debug.LogError("IsVisible not yet implemented");
+        Vector2 from1 = points[startIndex];
+        Vector2 to1 = points[toIndex];
+        var nextNode = polygon.First;
+
+        // Since we need to check if a point is visible from another, what we really want to know if is there's
+        // any line segment in the polygon being intersected by a line coming from and to the target points.
+        // This is, there's a line segment interrupting visibility from `start` to `to`
+        while(nextNode != null)
+        {
+            // Ignore if this is one of the elements we already know about
+            if (nextNode.Value == startIndex || nextNode.Value == toIndex)
+            {
+                nextNode = nextNode.Next;
+                continue;
+            }
+            Vector2 from2 = points[nextNode.Value];
+            Vector2 to2 = points[(nextNode.Next ?? polygon.First).Value];
+
+            if (LineSegmentsIntersect(from1, to1, from2, to2))
+                return false;
+
+            nextNode = nextNode.Next;
+        }
         return true;
     }
 
@@ -296,9 +341,17 @@ public class DeluanayTriangulation
                 Vector4.one
             );
 
-        return mat.determinant > 0;
+        return mat.determinant < 0;
     }
 
+    /// <summary>
+    /// Try to split a polygon in two by the specified triangle, the nodes are vertices of this triangles. This generates
+    /// Two new polygons
+    /// </summary>
+    /// <param name="start">Start of triangle, start of an edge in the original polygon</param>
+    /// <param name="end">End of triangle, end of an edge in the original polygon</param>
+    /// <param name="newVert">new vertex that we choose to form this triangle, usually won't be adjacent to start or end </param>
+    /// <returns>Two linked list corresponding to two different polygons formed by this split </returns>
     private static (LinkedList<int>, LinkedList<int>) SplitPolygonIn(LinkedListNode<int> start, LinkedListNode<int> end, LinkedListNode<int> newVert)
     {
         // Create list from end to newVert:
@@ -331,4 +384,37 @@ public class DeluanayTriangulation
         return (endToNext, nextToStart);
     }
 
+    private static bool LineSegmentsIntersect(Vector2 i1, Vector2 f1, Vector2 i2, Vector2 f2)
+    {
+        var di1 = Cross2D(f1 - i1, i2 - i1);
+        var df1 = Cross2D(f1 - i1, f2 - i1);
+        var di2 = Cross2D(f2 - i2, i1 - i2);
+        var df2 = Cross2D(f2 - i2, f1 - i2);
+        var delta = 0.001;
+
+        return ((di1 > 0 == df1 < 0) && (di2 > 0 == df2 < 0))
+            || (Mathf.Abs(di1) <= delta && InSegment(i1, f1, i2))
+            || (Mathf.Abs(df1) <= delta && InSegment(i1, f1, f2))
+            || (Mathf.Abs(di2) <= delta && InSegment(i2, f2, i1))
+            || (Mathf.Abs(df2) <= delta && InSegment(i2, f2, f1));
+    }
+
+    private static bool InSegment(Vector2 i, Vector2 f, Vector2 p)
+    {
+        return Mathf.Min(i.x, f.x) < p.x && p.x < Mathf.Max(i.x, f.x) &&
+               Mathf.Min(i.y, f.y) < p.y && p.y < Mathf.Max(i.y, f.y);
+    }
+
+    private static float Cross2D(Vector2 p1, Vector2 p2)
+    {
+        return p1.x * p2.y - p2.x * p1.y;
+    }
+
+    /// <summary>
+    /// Check if `vec` is pointing to the right side of the reference vector `refVec`
+    /// </summary>
+    /// <param name="refVec">Reference vector from which we want to check if `vec` if in the right side</param>
+    /// <param name="vec">Vector we want to check if is in the right side of `refVec`</param>
+    /// <returns></returns>
+    private static bool InRightSideOf(Vector2 refVec, Vector2 vec) => Cross2D(vec, refVec) > 0;
 }
