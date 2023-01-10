@@ -93,6 +93,11 @@ public class CutableMeshComponent : MonoBehaviour
         Gizmos.DrawLine(bottomLeft, topLeft);
     }
 
+    /// <summary>
+    /// Split this cutable mesh in two meshes by the specified plane*
+    /// </summary>
+    /// <param name="plane"></param>
+    /// <returns></returns>
     private List<Mesh> SplitMesh(Plane plane)
     {
         List<Mesh> result = new List<Mesh>();
@@ -101,9 +106,7 @@ public class CutableMeshComponent : MonoBehaviour
 
         List<TriangleIntersection> intersections;
         if (!IntersectPlaneToMesh(mesh, plane.normal, plane.distance, out intersections)) // No intersection
-        {
             return result;
-        }
 
         // Resize array once to avoid multiple array reallocations
         var vertices = mesh.vertices;
@@ -124,12 +127,20 @@ public class CutableMeshComponent : MonoBehaviour
         // so you add 2 * 3 * intersections.Count 
         Array.Resize(ref triangles,  triangles.Length + 3 * 2 * intersections.Count);
 
-        // Process this triangle
+        // Use this dictionary to avoid duplication of points that are already created by other triangle intersections.
+        // This is a map: Point of intersection -> (side a index, side b index, possible next point)
+        Dictionary<Vector2, (int, int, Vector2?)> existingPoints = new Dictionary<Vector2, (int, int, Vector2?)>();
         int i = 0;
         foreach(var intersection in intersections)
         {
-            AddTrianglesFromIntersectingTriangle(intersection, plane, ref vertices, ref uvs, ref normals, ref tangents, ref triangles, nextVertexIndex, nextTrianglesIndex, i++);
+            AddTrianglesFromIntersectingTriangle(intersection, plane, ref vertices, ref uvs, ref normals, ref tangents, ref triangles, nextVertexIndex, nextTrianglesIndex, i++, existingPoints);
         }
+
+        Array.Resize(ref vertices, nextVertexIndex + 2 * existingPoints.Count);
+        Array.Resize(ref uvs, nextVertexIndex + 2 * existingPoints.Count);
+        Array.Resize(ref normals, nextVertexIndex + 2 * existingPoints.Count);
+        Array.Resize(ref tangents, nextVertexIndex + 2 * existingPoints.Count);
+
 
         // Now that we added new segments, we can split using disjoints sets,
         // so we know which vertex corresponds to each new mesh
@@ -142,6 +153,30 @@ public class CutableMeshComponent : MonoBehaviour
         mesh.tangents = tangents;
         mesh.triangles = triangles;
         // ---------------------------------------------------
+
+        // Now that we have all the intersections and recently created points, we will triangulize the set of points.
+        // In order to do so, we will create a polygon with this vertices
+        // TODO: we assume that there's just a single polygon for now, but there might be more. Think about
+        // some ways of cutting an H letter, or slicing a torus
+        Vector3[] polygon = new Vector3[existingPoints.Count];
+        bool isPolygon = true;
+        Vector3? nextVertex = vertices[nextVertexIndex];
+        polygon[0] = vertices[nextVertexIndex];
+        for(i = 1; i < existingPoints.Count && isPolygon; i++)
+        {
+            (_, _, nextVertex) = existingPoints[nextVertex ?? Vector3.zero];
+            isPolygon = nextVertex != null;
+            polygon[i] = nextVertex ?? Vector3.zero;
+        }
+
+        if (!isPolygon)
+            return result;
+        // Now that we have the polygon, we have to convert it to 2D to be triangulated by our algorithm.
+        // Note that we don't need to do any back-conversion later, since we only care about indices and not
+        // about actual vertices, we already have those.
+
+        // To convert it to 2D, we will create a coordinate frame from plane points, and re-write these
+        // points according to that local coordinate frame
 
 
         return result;
@@ -157,47 +192,64 @@ public class CutableMeshComponent : MonoBehaviour
         ref int[] triangles, 
         int vertexIndexStart, 
         int triangleIndexStart, 
-        int intersectionIndex
+        int intersectionIndex,
+        Dictionary<Vector3, (int,int, Vector3?)> existingPoints
         )
     {
         // TODO this might be a good spot to register points to project and generate new tessellation to close mesh
 
         // Add new vertices to vertice array. We need to add four vertices, two per side of splitted mesh, so the resulting meshes
         // Will be disjoint
-        var nextVertexIndex = vertexIndexStart + intersectionIndex * 4;
-        vertices[nextVertexIndex]   = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
-        normals[nextVertexIndex]    = triangleIntersection.p1Attrs.normal;
-        uvs[nextVertexIndex]        = triangleIntersection.p1Attrs.uvs;
-        normals[nextVertexIndex]    = triangleIntersection.p1Attrs.normal;
-        tangents[nextVertexIndex]   = triangleIntersection.p1Attrs.tangent;
+        var nextVertexIndex = vertexIndexStart + 2 * existingPoints.Count;
+        int p1Side1, p1Side2;
+        if (existingPoints.ContainsKey(triangleIntersection.position1)) // TODO: We have to change this to use something with exact precision, this is a POC for now
+        {
+            Vector2? next;
+            (p1Side1, p1Side2, next) = existingPoints[triangleIntersection.position1];
+            if (next == null)
+                existingPoints[triangleIntersection.position1] = (p1Side1, p1Side2, triangleIntersection.position2);
+        }
+        else
+        {
+            (p1Side1, p1Side2) = (nextVertexIndex, nextVertexIndex + 1);
+            existingPoints[triangleIntersection.position1] = (p1Side1, p1Side2, );
+            nextVertexIndex += 2;
+        }
 
-        var p1IndexSide1 = nextVertexIndex;
-        nextVertexIndex++;
+        int p2Side1, p2Side2;
+        if (existingPoints.ContainsKey(triangleIntersection.position2)) // TODO: We have to change this to use something with exact precision, this is a POC for now
+        {
+            (p2Side1, p2Side2, _) = existingPoints[triangleIntersection.position2];
+        }
+        else
+        {
+            (p2Side1, p2Side2) = (nextVertexIndex, nextVertexIndex + 1);
+            existingPoints[triangleIntersection.position2] = (p2Side1, p2Side2, null);
+        }
 
-        vertices[nextVertexIndex]   = WorldToLocal(triangleIntersection.position2);
-        normals[nextVertexIndex]    = triangleIntersection.p2Attrs.normal;
-        uvs[nextVertexIndex]        = triangleIntersection.p2Attrs.uvs;
-        normals[nextVertexIndex]    = triangleIntersection.p2Attrs.normal;
-        tangents[nextVertexIndex]   = triangleIntersection.p2Attrs.tangent;
+        vertices[p1Side1]   = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
+        normals[p1Side1]    = triangleIntersection.p1Attrs.normal;
+        uvs[p1Side1]        = triangleIntersection.p1Attrs.uvs;
+        normals[p1Side1]    = triangleIntersection.p1Attrs.normal;
+        tangents[p1Side1]   = triangleIntersection.p1Attrs.tangent;
 
-        var p2IndexSide1 = nextVertexIndex;
-        nextVertexIndex++;
-        vertices[nextVertexIndex] = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
-        normals[nextVertexIndex] = triangleIntersection.p1Attrs.normal;
-        uvs[nextVertexIndex] = triangleIntersection.p1Attrs.uvs;
-        normals[nextVertexIndex] = triangleIntersection.p1Attrs.normal;
-        tangents[nextVertexIndex] = triangleIntersection.p1Attrs.tangent;
+        vertices[p2Side1]   = WorldToLocal(triangleIntersection.position2);
+        normals[p2Side1]    = triangleIntersection.p2Attrs.normal;
+        uvs[p2Side1]        = triangleIntersection.p2Attrs.uvs;
+        normals[p2Side1]    = triangleIntersection.p2Attrs.normal;
+        tangents[p2Side1]   = triangleIntersection.p2Attrs.tangent;
 
-        var p1IndexSide2 = nextVertexIndex;
-        nextVertexIndex++;
+        vertices[p1Side2] = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
+        normals[p1Side2] = triangleIntersection.p1Attrs.normal;
+        uvs[p1Side2] = triangleIntersection.p1Attrs.uvs;
+        normals[p1Side2] = triangleIntersection.p1Attrs.normal;
+        tangents[p1Side2] = triangleIntersection.p1Attrs.tangent;
 
-        vertices[nextVertexIndex] = WorldToLocal(triangleIntersection.position2);
-        normals[nextVertexIndex] = triangleIntersection.p2Attrs.normal;
-        uvs[nextVertexIndex] = triangleIntersection.p2Attrs.uvs;
-        normals[nextVertexIndex] = triangleIntersection.p2Attrs.normal;
-        tangents[nextVertexIndex] = triangleIntersection.p2Attrs.tangent;
-
-        var p2IndexSide2 = nextVertexIndex;
+        vertices[p2Side2] = WorldToLocal(triangleIntersection.position2);
+        normals[p2Side2] = triangleIntersection.p2Attrs.normal;
+        uvs[p2Side2] = triangleIntersection.p2Attrs.uvs;
+        normals[p2Side2] = triangleIntersection.p2Attrs.normal;
+        tangents[p2Side2] = triangleIntersection.p2Attrs.tangent;
 
         // Check which vertex of previous triangle was alone in the other side of the plane
         var v0Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[triangleIntersection.v0Index]));
@@ -205,7 +257,6 @@ public class CutableMeshComponent : MonoBehaviour
         var v2Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[triangleIntersection.v2Index]));
 
         int aloneIndex = -1, same1Index = -1, same2Index = -1;
-
 
         if (v0Side != v1Side && v0Side != v2Side)
         {
@@ -241,7 +292,7 @@ public class CutableMeshComponent : MonoBehaviour
 
 
         // Update old triangle
-        var (i, j, k) = ComputeWindingOrder(p2IndexSide1, p1IndexSide1, aloneIndex, originalNormal, vertices);
+        var (i, j, k) = ComputeWindingOrder(p2Side1, p1Side1, aloneIndex, originalNormal, vertices);
         triangles[triangleIntersection.v0TriangleIndex] = i;
         triangles[triangleIntersection.v2TriangleIndex] = j;
         triangles[triangleIntersection.v1TriangleIndex] = k;
@@ -249,13 +300,13 @@ public class CutableMeshComponent : MonoBehaviour
         // Create two new triangles
         //      One triangle
         var nextTriangleIndex = triangleIndexStart + 6 * intersectionIndex;
-        (i, j, k) = ComputeWindingOrder(same2Index, p1IndexSide2, p2IndexSide2, originalNormal, vertices);
+        (i, j, k) = ComputeWindingOrder(same2Index, p1Side2, p2Side2, originalNormal, vertices);
         triangles[nextTriangleIndex++] = i;
         triangles[nextTriangleIndex++] = j;
         triangles[nextTriangleIndex++] = k;
 
         //      Another triangle
-        (i, j, k) = ComputeWindingOrder(same2Index, same1Index, p1IndexSide2, originalNormal, vertices);
+        (i, j, k) = ComputeWindingOrder(same2Index, same1Index, p1Side2, originalNormal, vertices);
         triangles[nextTriangleIndex++] = i;
         triangles[nextTriangleIndex++] = j;
         triangles[nextTriangleIndex++] = k;
@@ -296,7 +347,7 @@ public class CutableMeshComponent : MonoBehaviour
         if (allSameSide)
             return false;
 
-        // Perform actual intersection now that we now that we actually might be intersecting this mesh
+        // Perform actual intersection now that we know that we actually might be intersecting this mesh
         var triangles = mesh.triangles;
         for(uint i = 0; i < mesh.triangles.Length; i += 3 )
         {
