@@ -46,13 +46,18 @@ public class CutableMeshComponent : MonoBehaviour
     }
 
     private MeshFilter _meshFilter;
-    
+
+    /// <summary>
+    /// Structure used to control adjacency of triangles in mesh. Useful to channel mesh intersection with plane
+    /// </summary>
+    private int[] _triangleAdjacency;
 
     // Start is called before the first frame update
     void Start()
     {
         _meshFilter = GetComponent<MeshFilter>();
         var mesh = _meshFilter.mesh;
+        _triangleAdjacency = CreateTriangleAdjacencyArray(mesh.triangles);
     }
 
     // Update is called once per frame
@@ -129,7 +134,7 @@ public class CutableMeshComponent : MonoBehaviour
 
         // Use this dictionary to avoid duplication of points that are already created by other triangle intersections.
         // This is a map: Point of intersection -> (side a index, side b index, possible next point)
-        Dictionary<Vector2, (int, int, Vector2?)> existingPoints = new Dictionary<Vector2, (int, int, Vector2?)>();
+        Dictionary<Vector3, (int, int, Vector3?)> existingPoints = new Dictionary<Vector3, (int, int, Vector3?)>();
         int i = 0;
         foreach(var intersection in intersections)
         {
@@ -159,8 +164,8 @@ public class CutableMeshComponent : MonoBehaviour
         // TODO: we assume that there's just a single polygon for now, but there might be more. Think about
         // some ways of cutting an H letter, or slicing a torus
         Vector3[] polygon = new Vector3[existingPoints.Count];
-        bool isPolygon = true;
         Vector3? nextVertex = vertices[nextVertexIndex];
+        bool isPolygon = nextVertex != null;
         polygon[0] = vertices[nextVertexIndex];
         for(i = 1; i < existingPoints.Count && isPolygon; i++)
         {
@@ -177,7 +182,15 @@ public class CutableMeshComponent : MonoBehaviour
 
         // To convert it to 2D, we will create a coordinate frame from plane points, and re-write these
         // points according to that local coordinate frame
+        // We know that if we create a coordinate frame i,j,k for this points, we can rewrite each point
+        // From the origin, say P' = P - Origin. Then P' = x * i + y * j + z *k, which is the same as
+        // [i j k] [x y z]' = P, and finally [x y z]' = [i j k]^-1 x P
+        var origin = polygon[0];
+        for(i = 0; i < polygon.Length; i++)
+        {
+            var P = polygon[i] - origin;
 
+        }
 
         return result;
     }
@@ -202,50 +215,53 @@ public class CutableMeshComponent : MonoBehaviour
         // Will be disjoint
         var nextVertexIndex = vertexIndexStart + 2 * existingPoints.Count;
         int p1Side1, p1Side2;
-        if (existingPoints.ContainsKey(triangleIntersection.position1)) // TODO: We have to change this to use something with exact precision, this is a POC for now
+        var p1Local = WorldToLocal(triangleIntersection.position1);
+        var p2Local = WorldToLocal(triangleIntersection.position2);
+
+        if (existingPoints.ContainsKey(p1Local)) // TODO: We have to change this to use something with exact precision, this is a POC for now
         {
-            Vector2? next;
-            (p1Side1, p1Side2, next) = existingPoints[triangleIntersection.position1];
+            Vector3? next;
+            (p1Side1, p1Side2, next) = existingPoints[p1Local];
             if (next == null)
-                existingPoints[triangleIntersection.position1] = (p1Side1, p1Side2, triangleIntersection.position2);
+                existingPoints[p1Local] = (p1Side1, p1Side2, p2Local);
         }
         else
         {
             (p1Side1, p1Side2) = (nextVertexIndex, nextVertexIndex + 1);
-            existingPoints[triangleIntersection.position1] = (p1Side1, p1Side2, );
+            existingPoints[p1Local] = (p1Side1, p1Side2, p2Local);
             nextVertexIndex += 2;
         }
 
         int p2Side1, p2Side2;
-        if (existingPoints.ContainsKey(triangleIntersection.position2)) // TODO: We have to change this to use something with exact precision, this is a POC for now
+        if (existingPoints.ContainsKey(p2Local)) // TODO: We have to change this to use something with exact precision, this is a POC for now
         {
-            (p2Side1, p2Side2, _) = existingPoints[triangleIntersection.position2];
+            (p2Side1, p2Side2, _) = existingPoints[p2Local];
         }
         else
         {
             (p2Side1, p2Side2) = (nextVertexIndex, nextVertexIndex + 1);
-            existingPoints[triangleIntersection.position2] = (p2Side1, p2Side2, null);
+            existingPoints[p2Local] = (p2Side1, p2Side2, null);
         }
 
-        vertices[p1Side1]   = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
+        vertices[p1Side1]   = p1Local; // Remember that intersections are computed in world coordinates
         normals[p1Side1]    = triangleIntersection.p1Attrs.normal;
         uvs[p1Side1]        = triangleIntersection.p1Attrs.uvs;
         normals[p1Side1]    = triangleIntersection.p1Attrs.normal;
         tangents[p1Side1]   = triangleIntersection.p1Attrs.tangent;
 
-        vertices[p2Side1]   = WorldToLocal(triangleIntersection.position2);
+        vertices[p2Side1]   = p2Local;
         normals[p2Side1]    = triangleIntersection.p2Attrs.normal;
         uvs[p2Side1]        = triangleIntersection.p2Attrs.uvs;
         normals[p2Side1]    = triangleIntersection.p2Attrs.normal;
         tangents[p2Side1]   = triangleIntersection.p2Attrs.tangent;
 
-        vertices[p1Side2] = WorldToLocal(triangleIntersection.position1); // Remember that intersections are computed in world coordinates
+        vertices[p1Side2] = p1Local; // Remember that intersections are computed in world coordinates
         normals[p1Side2] = triangleIntersection.p1Attrs.normal;
         uvs[p1Side2] = triangleIntersection.p1Attrs.uvs;
         normals[p1Side2] = triangleIntersection.p1Attrs.normal;
         tangents[p1Side2] = triangleIntersection.p1Attrs.tangent;
 
-        vertices[p2Side2] = WorldToLocal(triangleIntersection.position2);
+        vertices[p2Side2] = p2Local;
         normals[p2Side2] = triangleIntersection.p2Attrs.normal;
         uvs[p2Side2] = triangleIntersection.p2Attrs.uvs;
         normals[p2Side2] = triangleIntersection.p2Attrs.normal;
@@ -645,5 +661,53 @@ public class CutableMeshComponent : MonoBehaviour
         return (disjointSet.parents, components.Count);
     }
 
+    /// <summary>
+    /// Create a triangle adjacency array from a verex array. Each position i will have 
+    /// the index of triangle adjacent to edge vertices[i] -> vertices[(i+1) % 3]
+    /// </summary>
+    /// <param name="vertices">List of triangles specified as soup of triangles</param>
+    /// <returns>Adjacency array for each triangle</returns>
+    private static int[] CreateTriangleAdjacencyArray(int[] vertices)
+    {
+        int[] adjacency = new int[vertices.Length];
 
+        // Fill everything with -1 as default value
+        Array.Fill<int>(adjacency, -1);
+
+        // For every triangle in array...
+        for (int i = 0; i < adjacency.Length; i+=3)
+        {
+            // If we alreadoy found 3 triangles, then we have nothing more to look for
+            int count = 0;
+
+            // For every following triangle while we have neighbors to find...
+            for (int j = i+1; j < adjacency.Length && count < 3; j+=3)
+            {
+                // For each edge in triangle i...
+                for (int i_edge = 0; i_edge < 3; i_edge++)
+                {
+                    var i_start = vertices[i + i_edge];
+                    var i_end = vertices[i + (i_edge + 1) % 3];
+
+                    // For each edge in triangle j...
+                    for (int j_edge = 0; j_edge < 3; j_edge++)
+                    {
+                        var j_start = vertices[j];
+                        var j_end = vertices[j + (j_edge + 1) % 3];
+
+                        // If we found a matching edge, save it and look for the next edge
+                        if ((j_start == i_start && j_end == i_end) || (j_end == i_start && j_start == i_end))
+                        {
+                            adjacency[i + i_edge] = j;
+                            count++;
+                            break;
+                        }
+                    }
+                }
+                
+            }
+        }
+
+        return adjacency;
+    }
 }
