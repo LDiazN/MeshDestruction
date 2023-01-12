@@ -239,6 +239,10 @@ public class CutableMeshComponent : MonoBehaviour
             existingPoints[p2Local] = (p2Side1, p2Side2, null);
         }
 
+        // This array will map from intersection point (0,1) and side (0, 1) to its corresponding index in the vertex array.
+        // For example, A[i,j] is index of point i in side j
+        int[,] pointAndSideToIndex = new int[2, 2] { { p1Side1,p1Side2} , { p2Side1, p2Side2} };
+
         vertices[p1Side1]   = p1Local; // Remember that intersections are computed in world coordinates
         normals[p1Side1]    = triangleIntersection.pAttrs[0].normal;
         uvs[p1Side1]        = triangleIntersection.pAttrs[0].uvs;
@@ -268,64 +272,50 @@ public class CutableMeshComponent : MonoBehaviour
         var v2Index = triangles[triangleIntersection.triangleIndex+2];
 
         // Check which vertex of previous triangle was alone in the other side of the plane
-        var v0Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[v0Index]));
-        var v1Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[v1Index]));
-        var v2Side = SideOfPlane(plane.normal, plane.distance, LocalToWorld(vertices[v2Index]));
-
-        int aloneIndex = -1, same1Index = -1, same2Index = -1;
-
-        if (v0Side != v1Side && v0Side != v2Side)
+        int aloneIndex = -1; // This is the vertex isolated in one side of the plane
+        int midPrevIndex = -1;  // This is the index of the intersection position that's in the edge of aloneIndex - 1 -> aloneIndex
+        int midNextIndex = -1;  // This is the index of the intersection position that's in the edge of aloneIndex -> aloneIndex + 1
+        for (int vert = 0; vert < 3; vert ++)
         {
-            aloneIndex = (int) v0Index;
-
-            same1Index = (int) v1Index;
-
-            same2Index = (int) v2Index;
+            if ((triangleIntersection.edges[0] + 1) % 3 == vert && triangleIntersection.edges[1] == vert)
+            {
+                aloneIndex = vert;
+                midPrevIndex = 0;
+                midNextIndex = 1;
+                break;
+            }
+            else if ((triangleIntersection.edges[1] + 1) % 3 == vert && triangleIntersection.edges[0] == vert)
+            {
+                aloneIndex = vert;
+                midPrevIndex = 1;
+                midNextIndex = 0;
+                break;
+            }
         }
-        else if (v1Side != v0Side && v1Side != v2Side)
-        {
-            aloneIndex = (int) v1Index;
+        int prevIndex = aloneIndex - 1 < 0 ? 2 : aloneIndex - 1;
+        int nextIndex = (aloneIndex + 1) % 3;
+        Debug.Assert(aloneIndex != -1, "Couldn't find index alone in one side of plane");
 
-            same1Index = (int) v0Index;
-
-            same2Index = (int) v2Index;
-        }
-        else if (v2Side != v0Side && v2Side != v1Side)
-        {
-            aloneIndex = (int)v2Index;
-
-            same1Index = (int)v0Index;
-
-            same2Index = (int)v1Index;
-        }
-        else
-        {
-            Debug.Assert(false, "wtf"); // TODO debug weird bug where sometimes intersected triangles are all in the same side of the plane
-        }
-
-        // Compute current triangle normal, so we know where our triangle should face
-        var originalNormal = TriangleNormal(vertices[v0Index], vertices[v2Index], vertices[v1Index]);
-
+        int[] originalTriangle = new int[] { triangles[triangleIntersection.triangleIndex], triangles[triangleIntersection.triangleIndex + 1], triangles[triangleIntersection.triangleIndex + 2] };
 
         // Update old triangle
-        var (i, j, k) = ComputeWindingOrder(p1Side1, p2Side1, aloneIndex, originalNormal, vertices);
-        triangles[triangleIntersection.triangleIndex] = i;
-        triangles[triangleIntersection.triangleIndex + 1] = j;
-        triangles[triangleIntersection.triangleIndex + 2] = k;
+        // Leave first as is:
+        // triangles[triangleIntersection.triangleIndex + aloneIndex] = triangles[triangleIntersection.triangleIndex + aloneIndex]; 
+        triangles[triangleIntersection.triangleIndex + prevIndex] = pointAndSideToIndex[midPrevIndex, 0];
+        triangles[triangleIntersection.triangleIndex + nextIndex] = pointAndSideToIndex[midNextIndex, 0];
 
         // Create two new triangles
         //      One triangle
         var nextTriangleIndex = triangleIndexStart + 6 * intersectionIndex;
-        (i, j, k) = ComputeWindingOrder(same2Index, p1Side2, p2Side2, originalNormal, vertices);
-        triangles[nextTriangleIndex++] = i;
-        triangles[nextTriangleIndex++] = j;
-        triangles[nextTriangleIndex++] = k;
+        triangles[nextTriangleIndex + aloneIndex] = pointAndSideToIndex[midNextIndex, 1];
+        triangles[nextTriangleIndex + prevIndex] = pointAndSideToIndex[midPrevIndex, 1];
+        triangles[nextTriangleIndex + nextIndex] = originalTriangle[nextIndex];
+        nextTriangleIndex += 3;
 
         //      Another triangle
-        (i, j, k) = ComputeWindingOrder(same2Index, same1Index, p1Side2, originalNormal, vertices);
-        triangles[nextTriangleIndex++] = i;
-        triangles[nextTriangleIndex++] = j;
-        triangles[nextTriangleIndex++] = k;
+        triangles[nextTriangleIndex + prevIndex] = originalTriangle[prevIndex];
+        triangles[nextTriangleIndex + nextIndex] = originalTriangle[nextIndex];
+        triangles[nextTriangleIndex + aloneIndex] = pointAndSideToIndex[midPrevIndex, 1];
     }
 
     bool IntersectPlaneToMesh(in Mesh mesh, in Plane plane, out List<TriangleIntersection> intersectingTriangles)
@@ -370,7 +360,7 @@ public class CutableMeshComponent : MonoBehaviour
         for (int i = 0; i < mesh.triangles.Length; i += 3 )
         {
             TriangleIntersection result;
-            if (IntersectPlaneToTrianglev2(triangles, vertices, normals, tangents, uvs, i, plane, out result))
+            if (IntersectPlaneToTriangle(triangles, vertices, normals, tangents, uvs, i, plane, out result))
             {
                 result.triangleIndex = i;
                 intersectingTriangles.Add(result);
@@ -380,7 +370,7 @@ public class CutableMeshComponent : MonoBehaviour
         return intersectingTriangles.Count != 0;
     }
 
-    private bool IntersectPlaneToTrianglev2(
+    private bool IntersectPlaneToTriangle(
         in int[] triangles,
         in Vector3[] vertices,
         in Vector3[] normals,
@@ -431,50 +421,6 @@ public class CutableMeshComponent : MonoBehaviour
         Debug.Assert(nextIntersection == 2, "Invalid amount of intersections in a triangle, should be 2");
 
         return true;
-    }
-
-    private bool IntersectPlaneToTriangle(
-        in Vector3 v0, in Vector3 v1, in Vector3 v2, 
-        in Vector3 planeNormal, float planeDistance, 
-        in VertexAttributes v0Attrs, in VertexAttributes v1Attrs, in VertexAttributes v2Attrs, 
-        out TriangleIntersection intersection)
-    {
-        Vector3 intersectionPoint;
-        List<(Vector3, VertexAttributes)> intersections = new List<(Vector3, VertexAttributes)>(); // Should not contain more than 2 points
-        float t;
-
-        if (IntersectSegmentToPlane(v0, v1, planeNormal, planeDistance, out intersectionPoint, out t))
-        {
-            // Interpolate properties of this vertex
-            VertexAttributes newAttrs = InterpolateVertexAttributes(v0Attrs, v1Attrs, t);
-            intersections.Add((intersectionPoint, newAttrs));
-
-        }
-
-        if (IntersectSegmentToPlane(v0, v2, planeNormal, planeDistance, out intersectionPoint, out t))
-        {
-            VertexAttributes newAttrs = InterpolateVertexAttributes(v0Attrs, v2Attrs, t);
-            intersections.Add((intersectionPoint, newAttrs));
-        }
-
-        // Don't check if you already have 2 intersections, save some operations
-        if (intersections.Count < 2 && IntersectSegmentToPlane(v1, v2, planeNormal, planeDistance, out intersectionPoint, out t))
-        {
-            VertexAttributes newAttrs = InterpolateVertexAttributes(v1Attrs, v2Attrs, t);
-            intersections.Add((intersectionPoint, newAttrs));
-        }
-
-        // Sanity check
-        Debug.Assert(intersections.Count == 0 || intersections.Count == 2, "Invalid amount of intersections between plane and triangle");
-
-        intersection = new TriangleIntersection();
-        if (intersections.Count == 0)
-            return false;
-
-        (intersection.position[0], intersection.pAttrs[0]) = intersections[0];
-        (intersection.position[1], intersection.pAttrs[1]) = intersections[1];
-
-        return intersections.Count > 0;
     }
 
     private bool IntersectSegmentToPlane(in Vector3 v0, in Vector3 v1, in Vector3 planeNormal, float planeDistance, out Vector3 intersectionPoint, out float t)
