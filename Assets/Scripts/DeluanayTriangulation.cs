@@ -301,13 +301,15 @@ public class DeluanayTriangulation
         while(nextNode != null)
         {
             // Ignore if this is one of the elements we already know about
-            if (nextNode.Value == startIndex || nextNode.Value == toIndex)
+            //  this is the endpoint of the edge starting on `nextNode`
+            var nextNodeEndPointIndex = (nextNode.Next ?? polygon.First).Value;
+            if (nextNode.Value == startIndex || nextNode.Value == toIndex || nextNodeEndPointIndex == startIndex || nextNodeEndPointIndex == toIndex)
             {
                 nextNode = nextNode.Next;
                 continue;
             }
             Vector2 from2 = points[nextNode.Value];
-            Vector2 to2 = points[(nextNode.Next ?? polygon.First).Value];
+            Vector2 to2 = points[nextNodeEndPointIndex];
 
             if (LineSegmentsIntersect(from1, to1, from2, to2))
                 return false;

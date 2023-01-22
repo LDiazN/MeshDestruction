@@ -143,9 +143,7 @@ public class CutableMeshComponent : MonoBehaviour
         Array.Resize(ref tangents, nextVertexIndex + 2 * pointGraph.Count);
 
 
-        // Now that we added new segments, we can split using disjoints sets,
-        // so we know which vertex corresponds to each new mesh
-        var (components, nComponents) = ConnectedComponents(triangles, vertices.Length);
+        
 
         // -- DEBUG ONLY, DELETE LATER -----------------------
         mesh.vertices = vertices;
@@ -170,12 +168,125 @@ public class CutableMeshComponent : MonoBehaviour
         // points according to that local coordinate frame
         // We know that if we create a coordinate frame i,j,k for this points, we can rewrite each point
         // From the origin, say P' = P - Origin. Then P' = x * i + y * j + z *k, which is the same as
-        // [i j k] [x y z]' = P, and finally [x y z]' = [i j k]^-1 x P
-        // var origin = polygon[0];
-        // for(i = 0; i < polygon.Length; i++)
-        // {
-        //     var P = polygon[i] - origin;
-        // }
+        // [i j k] [x y z]' = P', and finally [x y z]' = [i j k]^-1 x P'
+        
+        // We also need to map from vertices index to actual 2D polygon indices
+        foreach(var polygon in polygons)
+        {
+            Debug.Assert(polygon.Count > 2, "This is an invalid polygon");
+
+            Vector2[] polygon2DVertices = new Vector2[polygon.Count];
+
+            // We use this array to map from local polygon indices to global indices
+            (int, int)[] localToGlobalPoly = new (int,int)[polygon.Count];
+
+            var (sideAOrig, sideBOrig) = polygon.First.Value;
+            var (sideAOther, sideBOther) = polygon.First.Next.Value;
+
+            var origin = vertices[sideAOrig];
+            var other = vertices[sideAOther];
+
+            // Create new reference frame
+            var u = Vector3.Normalize(other - origin);
+            var w = plane.normal;
+            var v = Vector3.Cross(u, w);
+            var transformMat = new Matrix4x4(u, v, w, new Vector4(origin.x, origin.y, origin.z, 1));
+            int nextIndex = 0;
+            foreach(var (sideA, sideB) in polygon)
+            {
+                var P = new Vector4( vertices[sideA].x, vertices[sideA].y, vertices[sideA].z, 1);
+                var P_ = transformMat.inverse * P;
+                polygon2DVertices[nextIndex] = new Vector2(P_.x, P_.y);
+                localToGlobalPoly[nextIndex++] = (sideA, sideB);
+            }
+
+            var triangulationResult = DeluanayTriangulation.Triangulate(polygon2DVertices, new List<Vector2[]>());
+
+            int startingIndex = triangles.Length;
+            Array.Resize(ref triangles, triangles.Length + 2 * triangulationResult.triangles.Length);
+
+            // Add triangles to the triangulation result
+            for(int j = 0; j < triangulationResult.triangles.Length; j += 3)
+            {
+                int triangleIndex = startingIndex + j / 3;
+                int v1SideA, v2SideA, v3SideA;
+                int v1SideB, v2SideB, v3SideB;
+                (v1SideA, v1SideB) = localToGlobalPoly[triangulationResult.triangles[j]];
+                (v2SideA, v2SideB) = localToGlobalPoly[triangulationResult.triangles[j+1]];
+                (v3SideA, v3SideB) = localToGlobalPoly[triangulationResult.triangles[j+2]];
+
+                triangles[triangleIndex++] = v1SideA;
+                triangles[triangleIndex++] = v2SideA;
+                triangles[triangleIndex++] = v3SideA;
+
+                triangles[triangleIndex++] = v1SideB;
+                triangles[triangleIndex++] = v2SideB;
+                triangles[triangleIndex++] = v3SideB;
+            }
+        }
+
+        mesh.triangles = triangles;
+
+        // Now that we added new segments, we can split using disjoints sets,
+        // so we know which vertex corresponds to each new mesh
+        var (components, nComponents) = ConnectedComponents(triangles, vertices.Length);
+        var componentToMesh = new Dictionary<int, MeshData>();
+        int[] wholeToPart = new int[vertices.Length];
+
+        for(int vertexIndex = 0; vertexIndex < vertices.Length; vertexIndex++)
+        {
+            int vertexComponent = components[vertexIndex];
+
+            MeshData meshData;
+
+            if (componentToMesh.ContainsKey(vertexComponent))
+                meshData = componentToMesh[vertexComponent];
+            else
+                meshData = componentToMesh[vertexComponent]   = new MeshData() { 
+                    triangles = new List<int>(),     normals  = new List<Vector3>(), 
+                    tangents  = new List<Vector4>(), vertices = new List<Vector3>(),
+                    uvs = new List<Vector2>()
+                };
+
+            // The index of the node in the new part is the size of the current list of attrs, it doesn't matter
+            // which attribute. Note that we don't need to check in which component we are, since 
+            // vertices are partitioned between components
+            wholeToPart[vertexIndex] = meshData.vertices.Count;
+
+            meshData.normals.Add(normals[vertexIndex]);
+            meshData.tangents.Add(tangents[vertexIndex]);
+            meshData.vertices.Add(vertices[vertexIndex]);
+            meshData.uvs.Add(uvs[vertexIndex]);
+        }
+
+        // We add triangles in a separate loop since we need to traverse over triangles array
+        // to add them. To add vertex attrs, we just needed to traverse vertices.
+        foreach (int vertexIndex in triangles)
+        {
+            int componentIndex = components[vertexIndex];
+            MeshData meshData = componentToMesh[componentIndex];
+            meshData.triangles.Add(wholeToPart[vertexIndex]);
+        }
+
+        // Now that we have all data correctly partitioned, we can turn them into new game objects.
+        // First object will be the current one, the rest will be created after new parts.
+        GameObject[] gameObjects = new GameObject[nComponents];
+        gameObjects[0] = gameObject;
+        for(int j = 1; j < nComponents; j++)
+            gameObjects[j] = Instantiate(gameObject);
+
+        int nextObjectIndex = 0;
+
+        // Set up every object with their corresponding vertex attributes
+        foreach(var (_, meshData) in componentToMesh)
+        {
+            Mesh objMesh = gameObjects[nextObjectIndex++].GetComponent<CutableMeshComponent>().GetMesh();
+            objMesh.vertices = meshData.vertices.ToArray();
+            objMesh.triangles = meshData.triangles.ToArray();
+            objMesh.normals = meshData.normals.ToArray();
+            objMesh.tangents = meshData.tangents.ToArray();
+            objMesh.uv = meshData.uvs.ToArray();
+        }
 
         return result;
     }
@@ -736,4 +847,15 @@ public class CutableMeshComponent : MonoBehaviour
 
         return result;
     }
+
+    private struct MeshData
+    {
+        public List<int> triangles;
+        public List<Vector3> vertices;
+        public List<Vector3> normals;
+        public List<Vector4> tangents;
+        public List<Vector2> uvs;
+    }
+
+    protected Mesh GetMesh() => _meshFilter.mesh;
 }
