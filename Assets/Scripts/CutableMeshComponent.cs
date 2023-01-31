@@ -123,15 +123,16 @@ public class CutableMeshComponent : MonoBehaviour
 
         var nextVertexIndex = vertices.Length;
         var nextTrianglesIndex = triangles.Length;
+        var originalVertexAmount = vertices.Length; // Required further down this function to compute connected components
 
         Array.Resize(ref vertices, vertices.Length + 4 * intersections.Count);
         Array.Resize(ref uvs, uvs.Length + 4 * intersections.Count);
-        Array.Resize(ref normals, normals.Length + 4 * intersections.Count); 
-        Array.Resize(ref tangents, tangents.Length + 4 * intersections.Count); 
+        Array.Resize(ref normals, normals.Length + 4 * intersections.Count);
+        Array.Resize(ref tangents, tangents.Length + 4 * intersections.Count);
 
         // Each intersection generates 2 more triangles and modifies one triangle in the previous mesh,
         // so you add 2 * 3 * intersections.Count 
-        Array.Resize(ref triangles,  triangles.Length + 3 * 2 * intersections.Count);
+        Array.Resize(ref triangles, triangles.Length + 3 * 2 * intersections.Count);
 
         // Use this dictionary to avoid duplication of points that are already created by other triangle intersections.
         // This is a map: Point of intersection -> (side a index, side b index, possible next point)
@@ -228,10 +229,9 @@ public class CutableMeshComponent : MonoBehaviour
         }
 
         mesh.triangles = triangles;
-
         // Now that we added new segments, we can split using disjoints sets,
         // so we know which vertex corresponds to each new mesh
-        var (components, nComponents) = ConnectedComponents(triangles, vertices.Length);
+        var (components, nComponents) = ConnectedComponents(triangles, vertices, originalVertexAmount);
         var componentToMesh = new Dictionary<int, MeshData>();
         int[] wholeToPart = new int[vertices.Length];
 
@@ -739,9 +739,11 @@ public class CutableMeshComponent : MonoBehaviour
     /// <param name="triangles">array of triangles, each 3 ints is a triangle</param>
     /// <param name="nVertices">ammount of vertices, this is the size of the returning array</param>
     /// <returns>Array of size `nVertices`, each index corresponds to the connected component for this vertex, and the amount of components found</returns>
-    private (int[], int) ConnectedComponents(in int [] triangles, int nVertices)
+    private (int[], int) ConnectedComponents(in int [] triangles, in Vector3[] vertices, int originalVertices)
     {
+        int nVertices = vertices.Length;
         DisjointSet disjointSet = new(nVertices);
+        // Merge nodes by sharing the same triangle
         for (int i = 0; i < triangles.Length; i += 3)
         {
             var v1 = triangles[i];
@@ -750,6 +752,20 @@ public class CutableMeshComponent : MonoBehaviour
 
             disjointSet.Merge(v1, v2);
             disjointSet.Merge(v1, v3);
+        }
+
+        // We also merge identical vertices if they're not recently generated 
+        // Because of a slicing
+        Dictionary<Vector3, int> vertexToComponent = new();
+        for(int i = 0; i < originalVertices; i++)
+        {
+            var vertex = vertices[i];
+            if (vertexToComponent.ContainsKey(vertex))
+            {
+                disjointSet.Merge(i, vertexToComponent[vertex]);
+            }
+            else
+                vertexToComponent[vertex] = i;
         }
 
         SortedSet<int> components = new();
